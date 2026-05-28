@@ -1,0 +1,9 @@
+{
+  "buildCommand": "npx drizzle-kit push && next build",
+  "crons": [
+    {
+      "path": "/api/cron/cleanup?key=@CRON_SECRET",
+      "schedule": "0 0 * * *"
+    }
+  ]
+}
