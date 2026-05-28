@@ -11,14 +11,12 @@ export async function GET(
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const isAdmin = session.user.role === "admin";
-
   try {
     const { id } = await params;
     const [note] = await db
       .select()
       .from(notes)
-      .where(and(eq(notes.id, id), isAdmin ? undefined : eq(notes.userId, session.user.id)));
+      .where(and(eq(notes.id, id), eq(notes.userId, session.user.id)));
     if (!note) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
     const noteTagsList = await db
@@ -40,7 +38,6 @@ export async function PUT(
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const isAdmin = session.user.role === "admin";
   const { id } = await params;
   let title: string | undefined;
   let content: string | undefined;
@@ -73,7 +70,7 @@ export async function PUT(
     const [note] = await db
       .update(notes)
       .set(updateFields)
-      .where(and(eq(notes.id, id), isAdmin ? undefined : eq(notes.userId, session.user.id)))
+      .where(and(eq(notes.id, id), eq(notes.userId, session.user.id)))
       .returning();
     if (!note) return NextResponse.json({ error: "Not found" }, { status: 404 });
     return NextResponse.json(note);
@@ -89,20 +86,18 @@ export async function DELETE(
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const isAdmin = session.user.role === "admin";
-
   try {
     const { id } = await params;
     const permanent = request.nextUrl.searchParams.get("permanent") === "true";
     if (permanent) {
       await db
         .delete(notes)
-        .where(and(eq(notes.id, id), isAdmin ? undefined : eq(notes.userId, session.user.id)));
+        .where(and(eq(notes.id, id), eq(notes.userId, session.user.id)));
     } else {
       await db
         .update(notes)
         .set({ deletedAt: new Date() })
-        .where(and(eq(notes.id, id), isAdmin ? undefined : eq(notes.userId, session.user.id)));
+        .where(and(eq(notes.id, id), eq(notes.userId, session.user.id)));
     }
     return NextResponse.json({ success: true });
   } catch {

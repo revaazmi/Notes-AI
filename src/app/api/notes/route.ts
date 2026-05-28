@@ -8,8 +8,6 @@ export async function GET(request: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const isAdmin = session.user.role === "admin";
-
   try {
     const url = new URL(request.url);
     const limitParam = url.searchParams.get("limit");
@@ -33,7 +31,7 @@ export async function GET(request: NextRequest) {
       ? eq(notes.category, categoryParam)
       : undefined;
     const filter = and(
-      isAdmin ? undefined : eq(notes.userId, session.user.id),
+      eq(notes.userId, session.user.id),
       isTrash ? isNotNull(notes.deletedAt) : isNull(notes.deletedAt),
       searchFilter,
       categoryFilter
