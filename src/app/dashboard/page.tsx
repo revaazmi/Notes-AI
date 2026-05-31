@@ -1,15 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
-
+import { useApi } from "@/lib/use-api";
 import { AuthGuard } from "@/components/auth/AuthGuard";
 import { NoteCard } from "@/components/features/NoteCard";
 import { AISuggestionCard } from "@/components/features/AISuggestionCard";
 import { stripMarkdown } from "@/lib/markdown";
 import { ReminderCard } from "@/components/features/ReminderCard";
 import { Button } from "@/components/ui/Button";
-
 
 interface Note {
   id: string;
@@ -24,6 +23,17 @@ interface Reminder {
   title: string;
   dueAt: string;
   priority: "high" | "medium" | "low";
+}
+
+interface Announcement {
+  id: string;
+  title: string;
+  content: string;
+}
+
+interface NotesResponse {
+  data: Note[];
+  total: number;
 }
 
 const suggestions = [
@@ -56,42 +66,15 @@ function formatReminderTime(date: string) {
 }
 
 export default function Dashboard() {
-  const [notes, setNotes] = useState<Note[]>([]);
-  const [reminders, setReminders] = useState<Reminder[]>([]);
-  const [notesLoading, setNotesLoading] = useState(true);
-  const [remindersLoading, setRemindersLoading] = useState(true);
-  const [notesError, setNotesError] = useState("");
-  const [remindersError, setRemindersError] = useState("");
-  const [refresh, setRefresh] = useState(0);
-  const [announcements, setAnnouncements] = useState<{ id: string; title: string; content: string }[]>([]);
   const [selectedSuggestion, setSelectedSuggestion] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetch("/api/announcements")
-      .then((r) => r.json())
-      .then((data) => { if (Array.isArray(data)) setAnnouncements(data); })
-      .catch(() => {});
-  }, []);
+  const { data: announcements } = useApi<Announcement[]>(["announcements"], "/api/announcements", true, 5 * 60 * 1000);
+  const { data: notesRes, isLoading: notesLoading, error: notesErr, refetch: refetchNotes } = useApi<NotesResponse>(["notes"], "/api/notes?limit=4");
+  const { data: reminders, isLoading: remindersLoading, error: remindersErr, refetch: refetchReminders } = useApi<Reminder[]>(["reminders"], "/api/reminders?limit=3");
 
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setNotesError("");
-    fetch("/api/notes")
-      .then((res) => (res.ok ? res.json() : { data: [] }))
-      .then((json: { data: Note[] }) => setNotes(json.data))
-      .catch(() => setNotesError("Failed to load notes"))
-      .finally(() => setNotesLoading(false));
-  }, [refresh]);
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setRemindersError("");
-    fetch("/api/reminders")
-      .then((res) => (res.ok ? res.json() : []))
-      .then((data: Reminder[]) => setReminders(data))
-      .catch(() => setRemindersError("Failed to load reminders"))
-      .finally(() => setRemindersLoading(false));
-  }, [refresh]);
+  const notes = notesRes?.data || [];
+  const notesError = notesErr ? "Failed to load notes" : "";
+  const remindersError = remindersErr ? "Failed to load reminders" : "";
 
   return (
     <AuthGuard>
@@ -101,7 +84,7 @@ export default function Dashboard() {
         <p className="text-body-md text-slate">Welcome back! Here&apos;s your notes overview.</p>
       </div>
 
-      {announcements.length > 0 && (
+      {announcements && announcements.length > 0 && (
         <div className="flex flex-col gap-md">
           {announcements.map((a) => (
             <div key={a.id} className="rounded-lg border border-primary/20 bg-primary/5 p-md">
@@ -137,7 +120,7 @@ export default function Dashboard() {
             {notesError && (
               <div className="rounded-lg bg-surface p-lg text-center flex flex-col items-center gap-md">
                 <p className="text-body-sm text-semantic-error">{notesError}</p>
-                <Button variant="secondary" onClick={() => setRefresh((r) => r + 1)}>Retry</Button>
+                <Button variant="secondary" onClick={() => refetchNotes()}>Retry</Button>
               </div>
             )}
 
@@ -221,19 +204,19 @@ export default function Dashboard() {
             {remindersError && (
               <div className="rounded-lg bg-surface p-lg text-center flex flex-col items-center gap-md">
                 <p className="text-body-sm text-semantic-error">{remindersError}</p>
-                <Button variant="secondary" onClick={() => setRefresh((r) => r + 1)}>Retry</Button>
+                <Button variant="secondary" onClick={() => refetchReminders()}>Retry</Button>
               </div>
             )}
 
             {!remindersLoading && !remindersError && (
               <>
-                {reminders.length === 0 ? (
+                {reminders && reminders.length === 0 ? (
                   <div className="rounded-lg bg-surface p-lg text-center">
                     <p className="text-body-sm text-slate">No reminders.</p>
                   </div>
                 ) : (
                   <div className="flex flex-col gap-sm">
-                    {reminders.slice(0, 3).map((r) => (
+                    {(reminders || []).slice(0, 3).map((r) => (
                       <ReminderCard
                         key={r.id}
                         title={r.title}

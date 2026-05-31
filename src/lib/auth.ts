@@ -49,24 +49,20 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     signIn: "/login",
   },
   callbacks: {
-    async jwt({ token, user }) {
+    async jwt({ token, user, trigger, session: triggerSession }) {
       if (user?.id) token.sub = user.id;
       if (user?.role) token.role = user.role;
+      if (user?.image) token.image = user.image;
+      if (trigger === "update" && triggerSession?.image) {
+        token.image = triggerSession.image;
+      }
       return token;
     },
     async session({ session, token }) {
       if (session.user && token.sub) {
         session.user.id = token.sub;
         session.user.role = (token.role as "admin" | "student") || "student";
-        try {
-          const [u] = await db
-            .select({ image: users.image })
-            .from(users)
-            .where(eq(users.id, token.sub));
-          session.user.image = u?.image || null;
-        } catch {
-          session.user.image = null;
-        }
+        session.user.image = (token.image as string) || null;
       }
       return session;
     },

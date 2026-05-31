@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useApi } from "@/lib/use-api";
 import { AuthGuard } from "@/components/auth/AuthGuard";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
+import { useQueryClient } from "@tanstack/react-query";
 
 interface Category {
   id: string;
@@ -14,22 +16,12 @@ interface Category {
 }
 
 export default function CategoriesPage() {
-  const [cats, setCats] = useState<Category[]>([]);
-  const [loading, setLoading] = useState(true);
+  const qc = useQueryClient();
   const [name, setName] = useState("");
   const [template, setTemplate] = useState("");
-  const [refresh, setRefresh] = useState(0);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    fetch("/api/categories")
-      .then((res) => (res.ok ? res.json() : []))
-      .then(setCats)
-      .catch(() => setError("Failed to load categories"))
-      .finally(() => setLoading(false));
-  }, [refresh]);
-
   const [actionError, setActionError] = useState("");
+
+  const { data: cats, isLoading: loading, error } = useApi<Category[]>(["categories"], "/api/categories", true, 5 * 60 * 1000);
 
   const create = async () => {
     if (!name.trim()) return;
@@ -43,7 +35,7 @@ export default function CategoriesPage() {
       if (!res.ok) { const d = await res.json(); setActionError(d.error || "Failed to create"); return; }
       setName("");
       setTemplate("");
-      setRefresh((r) => r + 1);
+      qc.invalidateQueries({ queryKey: ["categories"] });
     } catch {
       setActionError("Failed to create category");
     }
@@ -54,7 +46,7 @@ export default function CategoriesPage() {
     try {
       const res = await fetch(`/api/categories/${id}`, { method: "DELETE" });
       if (!res.ok) { setActionError("Failed to delete"); return; }
-      setRefresh((r) => r + 1);
+      qc.invalidateQueries({ queryKey: ["categories"] });
     } catch {
       setActionError("Failed to delete category");
     }
@@ -101,7 +93,7 @@ export default function CategoriesPage() {
 
       {error && !loading && (
         <div className="rounded-lg bg-surface p-hero text-center">
-          <p className="text-body-md text-semantic-error">{error}</p>
+          <p className="text-body-md text-semantic-error">Failed to load categories</p>
         </div>
       )}
 
@@ -116,13 +108,13 @@ export default function CategoriesPage() {
         </div>
       )}
 
-      {!loading && cats.length === 0 && (
+      {!loading && (!cats || cats.length === 0) && (
         <div className="rounded-lg bg-surface p-hero text-center">
           <p className="text-body-md text-slate">No categories yet. Add one above!</p>
         </div>
       )}
 
-      {!loading && cats.length > 0 && (
+      {!loading && cats && cats.length > 0 && (
         <div className="flex flex-col gap-sm">
           {cats.map((cat) => (
             <Card key={cat.id} variant="agent-tile" className="flex items-center gap-md">

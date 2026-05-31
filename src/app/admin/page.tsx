@@ -1,10 +1,14 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import ReactMarkdown from "react-markdown";
+import dynamic from "next/dynamic";
+import { useApi } from "@/lib/use-api";
+import { useQueryClient } from "@tanstack/react-query";
 import remarkGfm from "remark-gfm";
+
+const ReactMarkdown = dynamic(() => import("react-markdown"), { ssr: false });
 
 interface Stats {
   totalUsers: number;
@@ -83,14 +87,8 @@ const statCards: { key: keyof Stats; label: string; color: string; tab?: "users"
 export default function AdminPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
+  const qc = useQueryClient();
 
-  const [stats, setStats] = useState<Stats | null>(null);
-  const [users, setUsers] = useState<UserRow[]>([]);
-  const [notes, setNotes] = useState<NoteRow[]>([]);
-  const [reports, setReports] = useState<ReportRow[]>([]);
-  const [announcements, setAnnouncements] = useState<AnnouncementRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
   const [tab, setTab] = useState<"users" | "notes" | "reports" | "announcements" | "appbuilds">("users");
 
   const [userSearch, setUserSearch] = useState("");
@@ -119,66 +117,22 @@ export default function AdminPage() {
   const [announceActive, setAnnounceActive] = useState(true);
   const [savingAnnounce, setSavingAnnounce] = useState(false);
 
-  const fetchStats = useCallback(async () => {
-    const res = await fetch("/api/admin/stats");
-    if (!res.ok) return;
-    const data = await res.json();
-    if (!data.error) setStats(data);
-  }, []);
+  const isAdmin = status !== "loading" && session?.user?.role === "admin";
 
-  const fetchUsers = useCallback(async () => {
-    const params = new URLSearchParams();
-    if (userSearch) params.set("search", userSearch);
-    if (userRole) params.set("role", userRole);
-    if (userVerified) params.set("verified", userVerified);
-    const res = await fetch(`/api/admin/users?${params}`);
-    if (!res.ok) return;
-    const data = await res.json();
-    if (Array.isArray(data)) setUsers(data);
-  }, [userSearch, userRole, userVerified]);
+  const { data: stats } = useApi<Stats>(["admin-stats"], "/api/admin/stats", isAdmin);
+  const { data: reports } = useApi<ReportRow[]>(["admin-reports"], "/api/admin/reports", isAdmin);
+  const { data: users } = useApi<UserRow[]>(["admin-users", userSearch, userRole, userVerified], `/api/admin/users?${new URLSearchParams({ ...(userSearch ? { search: userSearch } : {}), ...(userRole ? { role: userRole } : {}), ...(userVerified ? { verified: userVerified } : {}) })}`, isAdmin && tab === "users");
+  const { data: notesData } = useApi<NoteRow[]>(["admin-notes", noteSearch, noteTrashed], `/api/admin/notes?${new URLSearchParams({ ...(noteSearch ? { search: noteSearch } : {}), ...(noteTrashed ? { trashed: noteTrashed } : {}), limit: "50" })}`, isAdmin && tab === "notes");
+  const { data: announcements } = useApi<AnnouncementRow[]>(["admin-announcements"], "/api/admin/announcements", isAdmin && tab === "announcements");
 
-  const fetchNotes = useCallback(async () => {
-    const params = new URLSearchParams();
-    if (noteSearch) params.set("search", noteSearch);
-    if (noteTrashed) params.set("trashed", noteTrashed);
-    params.set("limit", "50");
-    const res = await fetch(`/api/admin/notes?${params}`);
-    if (!res.ok) return;
-    const data = await res.json();
-    if (Array.isArray(data)) setNotes(data);
-  }, [noteSearch, noteTrashed]);
-
-  const fetchReports = useCallback(async () => {
-    const res = await fetch("/api/admin/reports");
-    if (!res.ok) return;
-    const data = await res.json();
-    if (Array.isArray(data)) setReports(data);
-  }, []);
-
-  const fetchAnnouncements = useCallback(async () => {
-    const res = await fetch("/api/admin/announcements");
-    if (!res.ok) return;
-    const data = await res.json();
-    if (Array.isArray(data)) setAnnouncements(data);
-  }, []);
+  const notes = notesData || [];
 
   useEffect(() => {
     if (status === "loading") return;
-    if (status === "unauthenticated" || session?.user?.role !== "admin") {
+    if (!isAdmin) {
       router.push("/dashboard");
-      return;
     }
-
-    /* eslint-disable react-hooks/set-state-in-effect */
-    const fetchers: Promise<void>[] = [fetchStats(), fetchReports()];
-    if (tab === "users") fetchers.push(fetchUsers());
-    else if (tab === "notes") fetchers.push(fetchNotes());
-    else if (tab === "announcements") fetchers.push(fetchAnnouncements());
-    Promise.all(fetchers)
-      .catch(() => setError("Failed to load data"))
-      .finally(() => setLoading(false));
-    /* eslint-enable react-hooks/set-state-in-effect */
-  }, [status, session, router, fetchStats, fetchUsers, fetchNotes, fetchReports, fetchAnnouncements, tab]);
+  }, [status, isAdmin, router]);
 
   useEffect(() => {
     if (!selectedNote) return;
@@ -215,20 +169,11 @@ export default function AdminPage() {
     return () => document.removeEventListener("keydown", handler);
   }, [announceSlide]);
 
-  if (status === "loading" || loading) {
+  if (status === "loading") {
     return (
       <div className="flex flex-col gap-section-sm p-xl">
         <h1 className="typography-heading-2 text-charcoal">Admin Panel</h1>
         <p className="text-body-md text-slate">Loading...</p>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="flex flex-col gap-section-sm p-xl">
-        <h1 className="typography-heading-2 text-charcoal">Admin Panel</h1>
-        <p className="text-body-sm text-semantic-error">{error}</p>
       </div>
     );
   }
@@ -259,7 +204,7 @@ export default function AdminPage() {
         })}
       </div>
 
-      {reports.filter((r) => r.status === "open").length > 0 && (
+      {(reports || []).filter((r) => r.status === "open").length > 0 && (
         <div className="flex flex-col gap-sm">
           <div className="flex items-center justify-between">
             <h2 className="typography-heading-4 text-charcoal">Open Reports</h2>
@@ -268,7 +213,7 @@ export default function AdminPage() {
             </button>
           </div>
           <div className="flex flex-col gap-sm">
-            {reports.filter((r) => r.status === "open").slice(0, 5).map((r) => (
+            {(reports || []).filter((r) => r.status === "open").slice(0, 5).map((r) => (
               <button
                 key={r.id}
                 onClick={() => { setSelectedReport(r); setReplyText(""); }}
@@ -345,7 +290,7 @@ export default function AdminPage() {
           </div>
 
           <div className="flex flex-col gap-sm md:hidden">
-            {users.map((u) => (
+            {(users || []).map((u) => (
               <button
                 key={u.id}
                 onClick={() => setSelectedUser(u)}
@@ -370,7 +315,7 @@ export default function AdminPage() {
                   <div className="flex items-center gap-1">
                     {!u.emailVerified && (
                       <button
-                        onClick={(e) => { e.stopPropagation(); fetch(`/api/admin/users/${u.id}/verify`, { method: "POST" }).then(fetchUsers); }}
+                        onClick={(e) => { e.stopPropagation(); fetch(`/api/admin/users/${u.id}/verify`, { method: "POST" }).then(() => qc.invalidateQueries({ queryKey: ["admin-users"] })); }}
                         className="rounded-md bg-brand-green/10 px-2 py-1 text-body-xs font-medium text-brand-green"
                       >
                         Verify
@@ -401,7 +346,7 @@ export default function AdminPage() {
                 </tr>
               </thead>
               <tbody>
-                {users.map((u) => (
+                {(users || []).map((u) => (
                   <tr key={u.id} className="border-b border-hairline text-ink cursor-pointer hover:bg-surface/50" onClick={() => setSelectedUser(u)}>
                     <td className="py-sm pr-md">{u.name || "\u2014"}</td>
                     <td className="py-sm pr-md">{u.email || "\u2014"}</td>
@@ -427,7 +372,7 @@ export default function AdminPage() {
                           onClick={async (e) => {
                             e.stopPropagation();
                             await fetch(`/api/admin/users/${u.id}/verify`, { method: "POST" });
-                            fetchUsers();
+                            qc.invalidateQueries({ queryKey: ["admin-users"] });
                           }}
                           className="rounded-md bg-brand-green/10 px-2 py-1 text-body-xs font-medium text-brand-green hover:bg-brand-green/20 transition-colors"
                           title="Verify email"
@@ -447,7 +392,7 @@ export default function AdminPage() {
                 ))}
               </tbody>
             </table>
-            {users.length === 0 && (
+            {(users || []).length === 0 && (
               <p className="text-body-md text-slate py-lg text-center">No users found.</p>
             )}
           </div>
@@ -547,7 +492,7 @@ export default function AdminPage() {
         <div className="flex flex-col gap-md">
           <div className="flex flex-wrap items-center gap-sm">
             {(["all", "open", "replied", "closed"] as const).map((f) => {
-              const count = f === "all" ? reports.length : reports.filter((r) => r.status === f).length;
+              const count = f === "all" ? (reports || []).length : (reports || []).filter((r) => r.status === f).length;
               return (
                 <button
                   key={f}
@@ -572,7 +517,7 @@ export default function AdminPage() {
           </div>
 
           <div className="flex flex-col gap-sm md:hidden">
-            {reports
+            {(reports || [])
               .filter((r) => reportFilter === "all" || r.status === reportFilter)
               .filter((r) => {
                 if (!reportSearch.trim()) return true;
@@ -603,7 +548,7 @@ export default function AdminPage() {
                   </button>
                 );
               })}
-            {reports
+            {(reports || [])
               .filter((r) => reportFilter === "all" || r.status === reportFilter)
               .filter((r) => {
                 if (!reportSearch.trim()) return true;
@@ -626,7 +571,7 @@ export default function AdminPage() {
                 </tr>
               </thead>
               <tbody>
-                {reports
+                {(reports || [])
                   .filter((r) => reportFilter === "all" || r.status === reportFilter)
                   .filter((r) => {
                     if (!reportSearch.trim()) return true;
@@ -661,7 +606,7 @@ export default function AdminPage() {
                 ))}
               </tbody>
             </table>
-            {reports.filter((r) => reportFilter === "all" || r.status === reportFilter).filter((r) => {
+            {(reports || []).filter((r) => reportFilter === "all" || r.status === reportFilter).filter((r) => {
               if (!reportSearch.trim()) return true;
               const q = reportSearch.toLowerCase();
               return r.message.toLowerCase().includes(q) || (r.name || "").toLowerCase().includes(q);
@@ -675,7 +620,7 @@ export default function AdminPage() {
       {tab === "announcements" && (
         <div className="flex flex-col gap-md">
           <div className="flex justify-between items-center">
-            <p className="text-body-sm text-slate">{announcements.length} announcement{announcements.length !== 1 ? "s" : ""}</p>
+            <p className="text-body-sm text-slate">{(announcements || []).length} announcement{(announcements || []).length !== 1 ? "s" : ""}</p>
             <button
               onClick={() => { setAnnounceSlide("create"); setAnnounceTitle(""); setAnnounceContent(""); setAnnounceActive(true); }}
               className="rounded-md bg-primary px-lg py-sm text-body-sm font-medium text-on-dark transition-opacity hover:opacity-90"
@@ -685,7 +630,7 @@ export default function AdminPage() {
           </div>
 
           <div className="flex flex-col gap-sm md:hidden">
-            {announcements.map((a) => (
+            {(announcements || []).map((a) => (
               <div key={a.id} className="flex flex-col gap-2 rounded-lg border border-hairline bg-surface p-md">
                 <div className="flex items-start justify-between gap-2">
                   <p className="text-body-sm font-medium text-ink flex-1">{a.title}</p>
@@ -696,7 +641,7 @@ export default function AdminPage() {
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({ active: !a.active }),
                       });
-                      fetchAnnouncements();
+                      qc.invalidateQueries({ queryKey: ["admin-announcements"] });
                     }}
                     className={`shrink-0 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-body-xs font-medium transition-colors ${
                       a.active ? "bg-brand-green/10 text-brand-green" : "bg-surface text-slate"
@@ -720,7 +665,7 @@ export default function AdminPage() {
                       onClick={async () => {
                         if (!confirm("Delete this announcement?")) return;
                         await fetch(`/api/admin/announcements/${a.id}`, { method: "DELETE" });
-                        fetchAnnouncements();
+                        qc.invalidateQueries({ queryKey: ["admin-announcements"] });
                       }}
                       className="rounded-md bg-semantic-error/10 px-2 py-1 text-body-xs font-medium text-semantic-error"
                     >
@@ -744,7 +689,7 @@ export default function AdminPage() {
                 </tr>
               </thead>
               <tbody>
-                {announcements.map((a) => (
+                {(announcements || []).map((a) => (
                   <tr key={a.id} className="border-b border-hairline text-ink">
                     <td className="py-sm pr-md font-medium">{a.title}</td>
                     <td className="py-sm pr-md max-w-[300px] truncate text-muted">{a.content}</td>
@@ -756,7 +701,7 @@ export default function AdminPage() {
                             headers: { "Content-Type": "application/json" },
                             body: JSON.stringify({ active: !a.active }),
                           });
-                          fetchAnnouncements();
+                          qc.invalidateQueries({ queryKey: ["admin-announcements"] });
                         }}
                         className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-body-xs font-medium transition-colors ${
                           a.active ? "bg-brand-green/10 text-brand-green" : "bg-surface text-slate"
@@ -781,7 +726,7 @@ export default function AdminPage() {
                           onClick={async () => {
                             if (!confirm("Delete this announcement?")) return;
                             await fetch(`/api/admin/announcements/${a.id}`, { method: "DELETE" });
-                            fetchAnnouncements();
+                            qc.invalidateQueries({ queryKey: ["admin-announcements"] });
                           }}
                           className="rounded-md bg-semantic-error/10 px-2 py-1 text-body-xs font-medium text-semantic-error hover:bg-semantic-error/20 transition-colors"
                         >
@@ -793,7 +738,7 @@ export default function AdminPage() {
                 ))}
               </tbody>
             </table>
-            {announcements.length === 0 && (
+            {(announcements || []).length === 0 && (
               <p className="text-body-md text-slate py-lg text-center">No announcements yet.</p>
             )}
           </div>
@@ -887,7 +832,7 @@ export default function AdminPage() {
                       onClick={async () => {
                         await fetch(`/api/admin/reports/${selectedReport.id}/close`, { method: "POST" });
                         setSelectedReport(null);
-                        fetchReports();
+                        qc.invalidateQueries({ queryKey: ["admin-reports"] });
                       }}
                       className="rounded-md bg-steel/10 px-lg py-sm text-body-sm font-medium text-steel hover:bg-steel/20 transition-colors"
                     >
@@ -898,7 +843,7 @@ export default function AdminPage() {
                       onClick={async () => {
                         await fetch(`/api/reports/${selectedReport.id}`, { method: "DELETE" });
                         setSelectedReport(null);
-                        fetchReports();
+                        qc.invalidateQueries({ queryKey: ["admin-reports"] });
                       }}
                       className="rounded-md bg-semantic-error/10 px-lg py-sm text-body-sm font-medium text-semantic-error hover:bg-semantic-error/20 transition-colors"
                     >
@@ -917,7 +862,7 @@ export default function AdminPage() {
                         });
                         setReplyText("");
                         setSelectedReport(null);
-                        fetchReports();
+                        qc.invalidateQueries({ queryKey: ["admin-reports"] });
                       } finally {
                         setSendingReply(false);
                       }
@@ -1116,7 +1061,7 @@ export default function AdminPage() {
                     onClick={async () => {
                       await fetch(`/api/admin/users/${selectedUser.id}/verify`, { method: "POST" });
                       setSelectedUser({ ...selectedUser, emailVerified: new Date().toISOString() });
-                      fetchUsers();
+                      qc.invalidateQueries({ queryKey: ["admin-users"] });
                     }}
                     className="w-full rounded-md bg-brand-green/10 px-lg py-sm text-body-sm font-medium text-brand-green hover:bg-brand-green/20 transition-colors"
                   >
@@ -1209,7 +1154,7 @@ export default function AdminPage() {
                       });
                     }
                     setAnnounceSlide(null);
-                    fetchAnnouncements();
+                    qc.invalidateQueries({ queryKey: ["admin-announcements"] });
                   } finally {
                     setSavingAnnounce(false);
                   }
@@ -1228,22 +1173,12 @@ export default function AdminPage() {
 }
 
 function AppBuildsTab() {
-  const [builds, setBuilds] = useState<{ id: string; version: string; fileName: string; fileSize: number; createdAt: string }[]>([]);
-  const [loading, setLoading] = useState(true);
   const [version, setVersion] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
+  const qc = useQueryClient();
 
-  const fetchBuilds = useCallback(async () => {
-    const res = await fetch("/api/admin/app-builds");
-    if (res.ok) setBuilds(await res.json());
-    setLoading(false);
-  }, []);
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchBuilds();
-  }, [fetchBuilds]);
+  const { data: builds, isLoading: loading } = useApi<{ id: string; version: string; fileName: string; fileSize: number; createdAt: string }[]>(["admin-builds"], "/api/admin/app-builds");
 
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1256,7 +1191,7 @@ function AppBuildsTab() {
     setVersion("");
     setFile(null);
     setUploading(false);
-    fetchBuilds();
+    qc.invalidateQueries({ queryKey: ["admin-builds"] });
   };
 
   return (
@@ -1289,11 +1224,11 @@ function AppBuildsTab() {
 
       {loading && <p className="text-body-sm text-slate">Loading builds...</p>}
 
-      {!loading && builds.length === 0 && (
+      {!loading && (builds || []).length === 0 && (
         <p className="text-body-md text-slate py-lg text-center">No builds uploaded yet.</p>
       )}
 
-      {!loading && builds.length > 0 && (
+      {!loading && (builds || []).length > 0 && (
         <div className="overflow-x-auto">
           <table className="w-full text-left text-body-sm">
             <thead>
@@ -1305,7 +1240,7 @@ function AppBuildsTab() {
               </tr>
             </thead>
             <tbody>
-              {builds.map((b) => (
+              {(builds || []).map((b) => (
                 <tr key={b.id} className="border-b border-hairline text-ink">
                   <td className="py-sm pr-md font-medium">{b.version}</td>
                   <td className="py-sm pr-md text-muted">{b.fileName}</td>

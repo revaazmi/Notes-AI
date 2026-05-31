@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useState } from "react";
+import { useApi } from "@/lib/use-api";
 import { AuthGuard } from "@/components/auth/AuthGuard";
 import { NoteCard } from "@/components/features/NoteCard";
 import { useDebounce } from "@/lib/useDebounce";
@@ -12,6 +13,11 @@ interface Note {
   content: string;
   category: string;
   updatedAt: string;
+}
+
+interface NotesResponse {
+  data: Note[];
+  total: number;
 }
 
 interface Category {
@@ -29,55 +35,30 @@ function formatTimeAgo(date: string) {
   return `${days}d ago`;
 }
 
-const PAGE_SIZE = 50;
-
 export default function SearchPage() {
-  const [notes, setNotes] = useState<Note[]>([]);
   const [query, setQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [notesError, setNotesError] = useState("");
-  const [categoriesError, setCategoriesError] = useState("");
   const debouncedQuery = useDebounce(query, 300);
 
-  const fetchResults = useCallback(async (searchTerm: string, catFilter: string) => {
-    if (!searchTerm && !catFilter) {
-      setNotes([]);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    setNotesError("");
-    try {
-      const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: "0" });
-      if (searchTerm) params.set("search", searchTerm);
-      if (catFilter) params.set("category", catFilter);
-      const res = await fetch(`/api/notes?${params}`);
-      if (!res.ok) throw new Error();
-      const json = await res.json();
-      setNotes(json.data || []);
-    } catch {
-      setNotesError("Failed to load notes");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const hasQueryOrFilter = !!(debouncedQuery || categoryFilter);
 
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchResults(debouncedQuery, categoryFilter);
-  }, [debouncedQuery, categoryFilter, fetchResults]);
+  const params = new URLSearchParams({ limit: "50", offset: "0" });
+  if (debouncedQuery) params.set("search", debouncedQuery);
+  if (categoryFilter) params.set("category", categoryFilter);
 
-  useEffect(() => {
-    fetch("/api/categories")
-      .then((res) => (res.ok ? res.json() : []))
-      .then(setCategories)
-      .catch(() => setCategoriesError("Failed to load categories"));
-  }, []);
+  const { data: notesData, isLoading: loading, error: notesErr } = useApi<NotesResponse>(
+    ["search-notes", debouncedQuery, categoryFilter],
+    `/api/notes?${params}`,
+    hasQueryOrFilter,
+  );
+  const notes = notesData?.data || [];
+
+  const { data: categoriesData } = useApi<Category[]>(["categories"], "/api/categories", true, 5 * 60 * 1000);
+  const categories = categoriesData || [];
 
   const allCategories = [...new Set([...notes.map((n) => n.category), ...categories.map((c) => c.name)])].sort();
-  const hasQueryOrFilter = !!(debouncedQuery || categoryFilter);
+
+  const notesErrMessage = notesErr ? "Failed to load notes" : "";
 
   return (
     <AuthGuard>
@@ -119,27 +100,25 @@ export default function SearchPage() {
         </div>
       )}
 
-      {notesError && !loading && (
+      {notesErrMessage && !loading && (
         <div className="rounded-lg bg-surface p-lg text-center">
-          <p className="text-body-sm text-semantic-error">{notesError}</p>
+          <p className="text-body-sm text-semantic-error">{notesErrMessage}</p>
         </div>
       )}
 
-      {categoriesError && !loading && !notesError && (
-        <div className="rounded-lg bg-surface p-lg text-center">
-          <p className="text-body-sm text-semantic-error">{categoriesError}</p>
-        </div>
-      )}
-
-      {!loading && !notesError && notes.length === 0 && (
+      {!loading && !notesErr && notes.length === 0 && hasQueryOrFilter && (
         <div className="rounded-lg bg-surface p-hero text-center">
-          <p className="text-body-md text-slate">
-            {hasQueryOrFilter ? "No notes match your search." : "Type something to search your notes."}
-          </p>
+          <p className="text-body-md text-slate">No notes match your search.</p>
         </div>
       )}
 
-      {!loading && !notesError && notes.length > 0 && (
+      {!loading && !notesErr && !hasQueryOrFilter && (
+        <div className="rounded-lg bg-surface p-hero text-center">
+          <p className="text-body-md text-slate">Type something to search your notes.</p>
+        </div>
+      )}
+
+      {!loading && !notesErr && notes.length > 0 && (
         <div>
           <p className="mb-md text-body-sm text-stone">{notes.length} result{notes.length > 1 ? "s" : ""}</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-md">

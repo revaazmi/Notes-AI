@@ -2,9 +2,12 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import ReactMarkdown from "react-markdown";
+import dynamic from "next/dynamic";
+import { useApi } from "@/lib/use-api";
 import remarkGfm from "remark-gfm";
 import { Button } from "@/components/ui/Button";
+
+const ReactMarkdown = dynamic(() => import("react-markdown"), { ssr: false });
 
 interface NoteEditorProps {
   noteId?: string;
@@ -18,7 +21,7 @@ export function NoteEditor({ noteId, initialTitle = "", initialContent = "", cat
   const [title, setTitle] = useState(initialTitle);
   const [content, setContent] = useState(initialContent);
   const [currentCategory, setCurrentCategory] = useState(category);
-  const [categories, setCategories] = useState<{ id: string; name: string; template: string }[]>([]);
+  const [addedTags, setAddedTags] = useState<{ id: string; name: string; color: string }[]>([]);
   const [aiSidebarOpen, setAiSidebarOpen] = useState(false);
   const [aiResult, setAiResult] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
@@ -33,11 +36,10 @@ export function NoteEditor({ noteId, initialTitle = "", initialContent = "", cat
   const [showMore, setShowMore] = useState(false);
   const moreRef = useRef<HTMLDivElement>(null);
   const [sharing, setSharing] = useState(false);
-  const [shareSlug, setShareSlug] = useState<string | null>(null);
-  const [shareOn, setShareOn] = useState(false);
+  const [localShareSlug, setLocalShareSlug] = useState<string | null>(null);
+  const [localShareOn, setLocalShareOn] = useState<boolean | null>(null);
   const [copied, setCopied] = useState(false);
-  const [noteTags, setNoteTags] = useState<{ id: string; name: string; color: string }[]>([]);
-  const [userTags, setUserTags] = useState<{ id: string; name: string; color: string }[]>([]);
+  const [localNoteTags, setLocalNoteTags] = useState<{ id: string; name: string; color: string }[] | null>(null);
   const [showTagInput, setShowTagInput] = useState(false);
   const [tagInputValue, setTagInputValue] = useState("");
   const isPreloaded = useMemo(() => !!(noteId && (initialTitle || initialContent)), [noteId, initialTitle, initialContent]);
@@ -71,28 +73,25 @@ export function NoteEditor({ noteId, initialTitle = "", initialContent = "", cat
     return () => window.removeEventListener("beforeunload", handler);
   }, [isDirty]);
 
-  useEffect(() => {
-    fetch("/api/categories")
-      .then((res) => (res.ok ? res.json() : []))
-      .then((data: { id: string; name: string; template: string }[]) => setCategories(data))
-      .catch(() => setActionError("Failed to load categories"));
-    fetch("/api/tags")
-      .then((res) => (res.ok ? res.json() : []))
-      .then(setUserTags)
-      .catch(() => {});
-  }, []);
+  const { data: categoriesData } = useApi<{ id: string; name: string; template: string }[]>(["categories"], "/api/categories", true, 5 * 60 * 1000);
+  const { data: tagsData } = useApi<{ id: string; name: string; color: string }[]>(["tags"], "/api/tags", true, 5 * 60 * 1000);
+  const { data: noteDetail } = useApi<{ isPublic: boolean; shareSlug: string; tags: { id: string; name: string; color: string }[] } | null>(
+    ["editor-note", noteId || ""],
+    noteId ? `/api/notes/${noteId}` : "",
+    !!noteId
+  );
 
-  useEffect(() => {
-    if (!noteId) return;
-    fetch(`/api/notes/${noteId}`)
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.isPublic !== undefined) setShareOn(d.isPublic);
-        if (d.shareSlug) setShareSlug(d.shareSlug);
-        if (d.tags) setNoteTags(d.tags);
-      })
-      .catch(() => {});
-  }, [noteId]);
+  const categories = categoriesData || [];
+  const userTags = useMemo(() => {
+    const tagMap = new Map<string, { id: string; name: string; color: string }>();
+    for (const t of (tagsData || [])) tagMap.set(t.id, t);
+    for (const t of addedTags) tagMap.set(t.id, t);
+    return Array.from(tagMap.values());
+  }, [tagsData, addedTags]);
+
+  const shareOn = localShareOn ?? noteDetail?.isPublic ?? false;
+  const shareSlug = localShareSlug ?? noteDetail?.shareSlug ?? null;
+  const noteTags = localNoteTags ?? noteDetail?.tags ?? [];
 
   const toggleShare = async () => {
     if (!noteId) return;
@@ -105,8 +104,8 @@ export function NoteEditor({ noteId, initialTitle = "", initialContent = "", cat
       });
       if (res.ok) {
         const data = await res.json();
-        setShareOn(!shareOn);
-        if (data.shareSlug) setShareSlug(data.shareSlug);
+        setLocalShareOn(!shareOn);
+        if (data.shareSlug) setLocalShareSlug(data.shareSlug);
       }
     } catch { /* ignore */ }
     setSharing(false);
@@ -129,7 +128,7 @@ export function NoteEditor({ noteId, initialTitle = "", initialContent = "", cat
     });
     if (res.ok) {
       const tag = userTags.find((t) => t.id === tagId);
-      if (tag) setNoteTags((prev) => [...prev, tag]);
+      if (tag) setLocalNoteTags((prev) => [...(prev || []), tag]);
     }
   };
 
@@ -140,7 +139,7 @@ export function NoteEditor({ noteId, initialTitle = "", initialContent = "", cat
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ tagId }),
     });
-    setNoteTags((prev) => prev.filter((t) => t.id !== tagId));
+    setLocalNoteTags((prev) => (prev || []).filter((t) => t.id !== tagId));
   };
 
   const createAndAddTag = async () => {
@@ -152,7 +151,7 @@ export function NoteEditor({ noteId, initialTitle = "", initialContent = "", cat
     });
     if (res.ok) {
       const newTag = await res.json();
-      setUserTags((prev) => [...prev, newTag]);
+      setAddedTags((prev) => [...prev, newTag]);
       await addTagToNote(newTag.id);
       setTagInputValue("");
       setShowTagInput(false);

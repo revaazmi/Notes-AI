@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { reports } from "@/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, count } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 
 export async function GET() {
@@ -11,8 +11,8 @@ export async function GET() {
       return NextResponse.json({ count: 0 });
     }
 
-    const unread = await db
-      .select()
+    const [row] = await db
+      .select({ value: count() })
       .from(reports)
       .where(
         and(
@@ -22,7 +22,7 @@ export async function GET() {
         )
       );
 
-    return NextResponse.json({ count: unread.length });
+    return NextResponse.json({ count: row.value });
   } catch {
     return NextResponse.json({ count: 0 });
   }

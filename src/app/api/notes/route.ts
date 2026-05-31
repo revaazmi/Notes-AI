@@ -10,14 +10,12 @@ export async function GET(request: NextRequest) {
 
   try {
     const url = new URL(request.url);
-    const limitParam = url.searchParams.get("limit");
-    const offsetParam = url.searchParams.get("offset");
     const trashParam = url.searchParams.get("trash");
     const searchParam = url.searchParams.get("search");
     const categoryParam = url.searchParams.get("category");
 
-    const limit = limitParam ? parseInt(limitParam, 10) : 0;
-    const offset = offsetParam ? parseInt(offsetParam, 10) : 0;
+    const limit = Math.min(Number(url.searchParams.get("limit")) || 50, 200);
+    const offset = Math.max(Number(url.searchParams.get("offset")) || 0, 0);
 
     const isTrash = trashParam === "true";
     const searchFilter = searchParam
@@ -51,7 +49,7 @@ export async function GET(request: NextRequest) {
     let query = isTrash
       ? queryBase.orderBy(desc(notes.deletedAt))
       : queryBase.orderBy(desc(notes.pinned), desc(notes.updatedAt));
-    if (limit > 0) query = query.limit(limit) as typeof query;
+    query = query.limit(limit) as typeof query;
     if (offset > 0) query = query.offset(offset) as typeof query;
 
     const data = await query;

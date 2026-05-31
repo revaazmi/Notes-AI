@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { reports } from "@/db/schema";
 import { eq, desc } from "drizzle-orm";
@@ -32,18 +32,21 @@ export async function POST(request: Request) {
   }
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     const session = await auth();
     if (!session?.user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const limit = Math.min(Number(request.nextUrl.searchParams.get("limit")) || 50, 200);
+
     const userReports = await db
       .select()
       .from(reports)
       .where(eq(reports.userId, session.user.id))
-      .orderBy(desc(reports.createdAt));
+      .orderBy(desc(reports.createdAt))
+      .limit(limit);
 
     return NextResponse.json(userReports);
   } catch {

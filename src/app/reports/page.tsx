@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useApi } from "@/lib/use-api";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { AuthGuard } from "@/components/auth/AuthGuard";
+import { useQueryClient } from "@tanstack/react-query";
 
 interface Reply {
   role: "admin" | "user";
@@ -39,15 +41,16 @@ const statusStyles: Record<string, { label: string; dot: string; bg: string }> =
 };
 
 export default function ReportsPage() {
+  const qc = useQueryClient();
   const { data: session } = useSession();
-  const [reports, setReports] = useState<Report[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
   const [selected, setSelected] = useState<Report | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [followUpText, setFollowUpText] = useState("");
   const [sendingFollowUp, setSendingFollowUp] = useState(false);
   const [followUpError, setFollowUpError] = useState("");
+
+  const { data: reports, isLoading: loading, error } = useApi<Report[]>(["my-reports"], "/api/reports", !!session?.user);
+  const reportsError = error ? "Failed to load reports" : "";
 
   const handleFollowUp = async () => {
     if (!selected || !followUpText.trim()) return;
@@ -64,14 +67,13 @@ export default function ReportsPage() {
         throw new Error(data.error || "Failed to send");
       }
       setFollowUpText("");
-      const newReply: Reply = { role: "user", message: followUpText.trim(), createdAt: new Date().toISOString() };
-      const updateReport = (prev: Report) => {
+      setSelected((prev) => {
+        if (!prev) return null;
         const r = JSON.parse(prev.replies || "[]");
-        r.push(newReply);
-        return { ...prev, replies: JSON.stringify(r), userReply: newReply.message, userRepliedAt: newReply.createdAt };
-      };
-      setReports((prev) => prev.map((r) => r.id === selected.id ? updateReport(r) : r));
-      setSelected((prev) => prev ? updateReport(prev) : null);
+        r.push({ role: "user", message: followUpText.trim(), createdAt: new Date().toISOString() });
+        return { ...prev, replies: JSON.stringify(r), status: "replied" };
+      });
+      qc.invalidateQueries({ queryKey: ["my-reports"] });
     } catch (err) {
       setFollowUpError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
@@ -85,26 +87,19 @@ export default function ReportsPage() {
     try {
       const res = await fetch(`/api/reports/${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error("Failed to delete");
-      setReports((prev) => prev.filter((r) => r.id !== id));
+      qc.invalidateQueries({ queryKey: ["my-reports"] });
       if (selected?.id === id) setSelected(null);
     } catch {
-      setError("Failed to delete report");
+      // ignore
     } finally {
       setDeleting(null);
     }
   };
 
   useEffect(() => {
-    if (!session?.user) return;
-    fetch("/api/reports")
-      .then((r) => r.json())
-      .then((data) => {
-        if (Array.isArray(data)) setReports(data);
-        else setError("Failed to load reports");
-      })
-      .catch(() => setError("Failed to load reports"))
-      .finally(() => setLoading(false));
-    fetch("/api/reports/mark-read", { method: "POST" }).catch(() => {});
+    if (session?.user) {
+      fetch("/api/reports/mark-read", { method: "POST" }).catch(() => {});
+    }
   }, [session]);
 
   useEffect(() => {
@@ -132,13 +127,13 @@ export default function ReportsPage() {
         </Link>
 
         {loading && <p className="text-body-md text-slate">Loading...</p>}
-        {error && <p className="text-body-sm text-semantic-error">{error}</p>}
+        {reportsError && <p className="text-body-sm text-semantic-error">{reportsError}</p>}
 
-        {!loading && !error && reports.length === 0 && (
+        {!loading && !reportsError && reports && reports.length === 0 && (
           <p className="text-body-md text-slate py-lg text-center">You haven&apos;t submitted any reports yet.</p>
         )}
 
-        {!loading && reports.length > 0 && (
+        {!loading && reports && reports.length > 0 && (
           <div className="flex flex-col gap-sm">
             {reports.map((r) => {
               const s = statusStyles[r.status] || statusStyles.open;

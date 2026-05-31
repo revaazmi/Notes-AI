@@ -1,21 +1,23 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/db";
 import { notes, reminders } from "@/db/schema";
 import { desc, eq, and } from "drizzle-orm";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const isAdmin = session.user.role === "admin";
+  const limit = Math.min(Number(request.nextUrl.searchParams.get("limit")) || 50, 200);
 
   try {
     const all = await db
       .select()
       .from(reminders)
       .where(isAdmin ? undefined : eq(reminders.userId, session.user.id))
-      .orderBy(desc(reminders.createdAt));
+      .orderBy(desc(reminders.createdAt))
+      .limit(limit);
     return NextResponse.json(all);
   } catch {
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

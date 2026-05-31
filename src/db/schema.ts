@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp, integer, primaryKey, boolean } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, timestamp, integer, primaryKey, boolean, index } from "drizzle-orm/pg-core";
 
 export const users = pgTable("users", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -24,12 +24,13 @@ export const accounts = pgTable(
     access_token: text("access_token"),
     expires_at: integer("expires_at"),
     token_type: text("token_type"),
-    scope: text("scope"),
     id_token: text("id_token"),
+    scope: text("scope"),
     session_state: text("session_state"),
   },
   (account) => ({
     compoundKey: primaryKey({ columns: [account.provider, account.providerAccountId] }),
+    userIdIdx: index("idx_accounts_user").on(account.userId),
   })
 );
 
@@ -39,7 +40,9 @@ export const sessions = pgTable("sessions", {
     .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
   expires: timestamp("expires", { mode: "date" }).notNull(),
-});
+}, (table) => ({
+  userIdIdx: index("idx_sessions_user").on(table.userId),
+}));
 
 export const verificationTokens = pgTable(
   "verificationTokens",
@@ -68,7 +71,10 @@ export const notes = pgTable("notes", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
-});
+}, (table) => ({
+  userDeletedIdx: index("idx_notes_user_deleted").on(table.userId, table.deletedAt),
+  updatedIdx: index("idx_notes_updated").on(table.updatedAt),
+}));
 
 export const categories = pgTable("categories", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -78,7 +84,9 @@ export const categories = pgTable("categories", {
   name: text("name").notNull(),
   template: text("template").notNull().default(""),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-});
+}, (table) => ({
+  userIdIdx: index("idx_categories_user").on(table.userId),
+}));
 
 export const tags = pgTable("tags", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -88,7 +96,9 @@ export const tags = pgTable("tags", {
   name: text("name").notNull(),
   color: text("color").notNull().default("#6C4CE0"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-});
+}, (table) => ({
+  userIdIdx: index("idx_tags_user").on(table.userId),
+}));
 
 export const noteTags = pgTable(
   "note_tags",
@@ -139,7 +149,9 @@ export const reminders = pgTable("reminders", {
   dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
   priority: text("priority").notNull().default("medium"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-});
+}, (table) => ({
+  userIdIdx: index("idx_reminders_user").on(table.userId),
+}));
 
 export const appBuilds = pgTable("app_builds", {
   id: uuid("id").defaultRandom().primaryKey(),

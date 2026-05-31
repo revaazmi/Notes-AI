@@ -46,7 +46,10 @@ export async function GET(request: NextRequest) {
       query.where(and(...conditions));
     }
 
-    const all = await query.orderBy(asc(users.createdAt));
+    const limit = Math.min(Number(request.nextUrl.searchParams.get("limit")) || 50, 200);
+    const offset = Math.max(Number(request.nextUrl.searchParams.get("offset")) || 0, 0);
+
+    const all = await query.orderBy(asc(users.createdAt)).limit(limit).offset(offset);
 
     return NextResponse.json(all);
   } catch {

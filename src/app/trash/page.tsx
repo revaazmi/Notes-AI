@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useApi } from "@/lib/use-api";
 import { AuthGuard } from "@/components/auth/AuthGuard";
 import { Button } from "@/components/ui/Button";
+import { useQueryClient } from "@tanstack/react-query";
 
 interface Note {
   id: string;
@@ -10,6 +12,11 @@ interface Note {
   content: string;
   category: string;
   deletedAt: string;
+}
+
+interface NotesResponse {
+  data: Note[];
+  total: number;
 }
 
 function formatTimeAgo(date: string) {
@@ -23,33 +30,18 @@ function formatTimeAgo(date: string) {
 }
 
 export default function TrashPage() {
-  const [notes, setNotes] = useState<Note[]>([]);
-  const [loading, setLoading] = useState(true);
+  const qc = useQueryClient();
   const [error, setError] = useState("");
 
-  const fetchTrash = async () => {
-    setLoading(true);
-    setError("");
-    try {
-      const res = await fetch("/api/notes?trash=true&limit=50");
-      if (!res.ok) { setError("Failed to load trash."); return; }
-      const json = await res.json();
-      if (!json.data) { setError("Invalid response from server."); return; }
-      setNotes(json.data);
-    } catch {
-      setError("Failed to load trash.");
-    } finally {
-      setLoading(false);
-    }
-  };
+  const { data: res, isLoading: loading, error: queryErr, refetch } = useApi<NotesResponse>(["trash-notes"], "/api/notes?trash=true&limit=50");
 
-  useEffect(() => { fetchTrash(); }, []); // eslint-disable-line react-hooks/set-state-in-effect
+  const notes = res?.data || [];
 
   const restore = async (id: string) => {
     try {
       const res = await fetch(`/api/notes/${id}/restore`, { method: "POST" });
       if (!res.ok) { setError("Failed to restore note."); return; }
-      setNotes((prev) => prev.filter((n) => n.id !== id));
+      qc.invalidateQueries({ queryKey: ["trash-notes"] });
     } catch {
       setError("Failed to restore note.");
     }
@@ -60,7 +52,7 @@ export default function TrashPage() {
     try {
       const res = await fetch(`/api/notes/${id}?permanent=true`, { method: "DELETE" });
       if (!res.ok) { setError("Failed to delete note."); return; }
-      setNotes((prev) => prev.filter((n) => n.id !== id));
+      qc.invalidateQueries({ queryKey: ["trash-notes"] });
     } catch {
       setError("Failed to delete note.");
     }
@@ -92,14 +84,14 @@ export default function TrashPage() {
         </div>
       )}
 
-      {error && (
+      {(error || queryErr) && (
         <div className="rounded-lg bg-surface p-lg text-center flex flex-col items-center gap-md">
-          <p className="text-body-sm text-semantic-error">{error}</p>
-          <Button variant="secondary" onClick={fetchTrash}>Retry</Button>
+          <p className="text-body-sm text-semantic-error">{error || "Failed to load trash"}</p>
+          <Button variant="secondary" onClick={() => refetch()}>Retry</Button>
         </div>
       )}
 
-      {!loading && !error && notes.length === 0 && (
+      {!loading && !error && !queryErr && notes.length === 0 && (
         <div className="flex flex-col items-center gap-md rounded-lg bg-surface p-hero">
           <p className="text-body-md text-slate">Trash is empty.</p>
         </div>

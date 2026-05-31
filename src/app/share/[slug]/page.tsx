@@ -1,41 +1,39 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useParams } from "next/navigation";
-import ReactMarkdown from "react-markdown";
+import { useApi } from "@/lib/use-api";
+import dynamic from "next/dynamic";
 import remarkGfm from "remark-gfm";
+
+const ReactMarkdown = dynamic(() => import("react-markdown"), { ssr: false });
 
 export default function SharedNotePage() {
   const { slug } = useParams<{ slug: string }>();
-  const [data, setData] = useState<{ title: string; content: string; createdAt: string } | null>(null);
-  const [error, setError] = useState("");
   const [dismissed, setDismissed] = useState(false);
 
-  useEffect(() => {
-    if (!slug) return;
-    fetch(`/api/share/${slug}`)
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.error) setError(d.error);
-        else setData(d);
-      })
-      .catch(() => setError("Failed to load note"));
-  }, [slug]);
+  const { data, error: queryErr } = useApi<{ title: string; content: string; createdAt: string } | { error: string }>(
+    ["shared-note", slug],
+    `/api/share/${slug}`,
+    !!slug
+  );
 
+  const fetchError = (data && 'error' in data) ? data.error : "";
+  const errMsg = fetchError || (queryErr ? "Failed to load note" : "");
   const handleDismiss = () => setDismissed(true);
 
-  if (error) {
+  if (errMsg) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-canvas p-xl">
         <div className="text-center">
           <h1 className="typography-heading-2 text-charcoal mb-md">Not Found</h1>
-          <p className="text-body-md text-slate">{error}</p>
+          <p className="text-body-md text-slate">{errMsg}</p>
         </div>
       </div>
     );
   }
 
-  if (!data) {
+  if (!data || 'error' in data) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-canvas p-xl">
         <div className="flex items-center gap-3">

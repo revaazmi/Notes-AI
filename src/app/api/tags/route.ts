@@ -1,18 +1,21 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/db";
 import { tags } from "@/db/schema";
 import { eq, asc } from "drizzle-orm";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const limit = Math.min(Number(request.nextUrl.searchParams.get("limit")) || 100, 200);
 
   const userTags = await db
     .select()
     .from(tags)
     .where(eq(tags.userId, session.user.id))
-    .orderBy(asc(tags.name));
+    .orderBy(asc(tags.name))
+    .limit(limit);
 
   return NextResponse.json(userTags);
 }

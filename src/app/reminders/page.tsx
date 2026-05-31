@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useApi } from "@/lib/use-api";
 import { AuthGuard } from "@/components/auth/AuthGuard";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
+import { useQueryClient } from "@tanstack/react-query";
 
 interface Reminder {
   id: string;
@@ -40,24 +42,13 @@ const priorityLabels: Record<string, string> = {
 };
 
 export default function RemindersPage() {
-  const [reminders, setReminders] = useState<Reminder[]>([]);
-  const [loading, setLoading] = useState(true);
+  const qc = useQueryClient();
   const [title, setTitle] = useState("");
   const [dueAt, setDueAt] = useState("");
   const [priority, setPriority] = useState<"high" | "medium" | "low">("medium");
-  const [refresh, setRefresh] = useState(0);
-  const [error, setError] = useState("");
   const [actionError, setActionError] = useState("");
 
-  useEffect(() => {
-    fetch("/api/reminders")
-      .then((res) => (res.ok ? res.json() : []))
-      .then(setReminders)
-      .catch(() => setError("Failed to load reminders"))
-      .finally(() => setLoading(false));
-  }, [refresh]);
-
-  const reload = () => setRefresh((r) => r + 1);
+  const { data: reminders, isLoading: loading, error } = useApi<Reminder[]>(["reminders-page"], "/api/reminders?limit=50");
 
   const create = async () => {
     if (!title.trim() || !dueAt) return;
@@ -72,7 +63,7 @@ export default function RemindersPage() {
       setTitle("");
       setDueAt("");
       setPriority("medium");
-      reload();
+      qc.invalidateQueries({ queryKey: ["reminders-page"] });
     } catch {
       setActionError("Failed to create reminder");
     }
@@ -84,7 +75,7 @@ export default function RemindersPage() {
     try {
       const res = await fetch(`/api/reminders/${id}`, { method: "DELETE" });
       if (!res.ok) { setActionError("Failed to delete"); return; }
-      reload();
+      qc.invalidateQueries({ queryKey: ["reminders-page"] });
     } catch {
       setActionError("Failed to delete reminder");
     }
@@ -147,7 +138,7 @@ export default function RemindersPage() {
 
       {error && !loading && (
         <div className="rounded-lg bg-surface p-hero text-center">
-          <p className="text-body-md text-semantic-error">{error}</p>
+          <p className="text-body-md text-semantic-error">Failed to load reminders</p>
         </div>
       )}
 
@@ -162,13 +153,13 @@ export default function RemindersPage() {
         </div>
       )}
 
-      {!loading && reminders.length === 0 && (
+      {!loading && (!reminders || reminders.length === 0) && (
         <div className="rounded-lg bg-surface p-hero text-center">
           <p className="text-body-md text-slate">No reminders yet. Add one above!</p>
         </div>
       )}
 
-      {!loading && reminders.length > 0 && (
+      {!loading && reminders && reminders.length > 0 && (
         <div className="flex flex-col gap-sm">
           {reminders.map((r) => (
             <Card key={r.id} variant="agent-tile" className="flex items-center gap-md">

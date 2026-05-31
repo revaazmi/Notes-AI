@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import Script from "next/script";
 import { SessionProvider } from "next-auth/react";
+import { QueryProvider } from "@/lib/query-provider";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { SidebarProvider } from "@/lib/sidebar-context";
@@ -37,15 +38,17 @@ export default function RootLayout({
       <body className="h-full flex" suppressHydrationWarning>
         <RootErrorBoundary>
           <SessionProvider>
-            <ThemeProvider>
-              <SidebarProvider>
-                  <Header />
-                  <Sidebar />
-                  <ServiceWorkerRegister />
-                  <FloatingNewNoteButton />
-                  <MainWrapper>{children}</MainWrapper>
-              </SidebarProvider>
-            </ThemeProvider>
+            <QueryProvider>
+              <ThemeProvider>
+                <SidebarProvider>
+                    <Header />
+                    <Sidebar />
+                    <ServiceWorkerRegister />
+                    <FloatingNewNoteButton />
+                    <MainWrapper>{children}</MainWrapper>
+                </SidebarProvider>
+              </ThemeProvider>
+            </QueryProvider>
           </SessionProvider>
         </RootErrorBoundary>
       </body>

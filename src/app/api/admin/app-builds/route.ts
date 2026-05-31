@@ -4,14 +4,17 @@ import { db } from "@/db";
 import { appBuilds } from "@/db/schema";
 import { desc } from "drizzle-orm";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const session = await auth();
   if (session?.user?.role !== "admin") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const limit = Math.min(Number(request.nextUrl.searchParams.get("limit")) || 50, 200);
 
   const builds = await db
     .select({ id: appBuilds.id, version: appBuilds.version, fileName: appBuilds.fileName, fileSize: appBuilds.fileSize, createdAt: appBuilds.createdAt })
     .from(appBuilds)
-    .orderBy(desc(appBuilds.createdAt));
+    .orderBy(desc(appBuilds.createdAt))
+    .limit(limit);
 
   return NextResponse.json(builds);
 }

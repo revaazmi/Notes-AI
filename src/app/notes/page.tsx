@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useState } from "react";
 import Link from "next/link";
+import { useInfiniteQuery } from "@tanstack/react-query";
+import { useApi } from "@/lib/use-api";
 import { AuthGuard } from "@/components/auth/AuthGuard";
 import { NoteCard } from "@/components/features/NoteCard";
 import { Button } from "@/components/ui/Button";
@@ -22,6 +24,11 @@ interface Note {
   updatedAt: string;
   pinned?: boolean;
   tags?: NoteTag[];
+}
+
+interface NotesResponse {
+  data: Note[];
+  total: number;
 }
 
 interface Category {
@@ -48,18 +55,9 @@ function formatTimeAgo(date: string) {
 const PAGE_SIZE = 12;
 
 export default function AllNotesPage() {
-  const [notes, setNotes] = useState<Note[]>([]);
-  const [total, setTotal] = useState(0);
-  const [offset, setOffset] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [error, setError] = useState(false);
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
   const [tagFilter, setTagFilter] = useState("");
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [allTags, setAllTags] = useState<Tag[]>([]);
-  const [errorMsg, setErrorMsg] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkAction, setBulkAction] = useState("");
   const [bulkCategory, setBulkCategory] = useState("");
@@ -68,57 +66,40 @@ export default function AllNotesPage() {
   const [selectMode, setSelectMode] = useState(false);
 
   const debouncedSearch = useDebounce(search, 300);
-
-  const fetchNotes = useCallback(async (pageOffset: number, append: boolean, searchTerm?: string, catFilter?: string, tagFilterVal?: string) => {
-    if (append) setLoadingMore(true); else setLoading(true);
-    try {
-      const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(pageOffset) });
-      if (searchTerm) params.set("search", searchTerm);
-      if (catFilter) params.set("category", catFilter);
-      if (tagFilterVal) params.set("tag", tagFilterVal);
-      const res = await fetch(`/api/notes?${params}`);
-      if (!res.ok) throw new Error();
-      const json = await res.json();
-      const data: Note[] = json.data;
-      const totalCount: number = json.total;
-      if (append) {
-        setNotes((prev) => [...prev, ...data]);
-      } else {
-        setNotes(data);
-      }
-      setTotal(totalCount);
-      setOffset(pageOffset);
-    } catch {
-      setError(true);
-    } finally {
-      setLoading(false);
-      setLoadingMore(false);
-    }
-  }, []);
-
   const isFiltering = !!(debouncedSearch || categoryFilter || tagFilter);
 
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setSelected(new Set());
-    setOffset(0);
-    fetchNotes(0, false, debouncedSearch, categoryFilter, tagFilter);
-  }, [debouncedSearch, categoryFilter, tagFilter, fetchNotes]);
+  const buildParams = (pageOffset: number) => {
+    const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(pageOffset) });
+    if (debouncedSearch) params.set("search", debouncedSearch);
+    if (categoryFilter) params.set("category", categoryFilter);
+    if (tagFilter) params.set("tag", tagFilter);
+    return params;
+  };
 
-  useEffect(() => {
-    fetch("/api/categories")
-      .then((res) => (res.ok ? res.json() : []))
-      .then(setCategories)
-      .catch(() => setErrorMsg("Failed to load categories"));
-    fetch("/api/tags")
-      .then((res) => (res.ok ? res.json() : []))
-      .then(setAllTags)
-      .catch(() => {});
-  }, []);
+  const { data, isLoading, isError, isFetchingNextPage, hasNextPage, fetchNextPage, refetch } = useInfiniteQuery<NotesResponse>({
+    queryKey: ["notes-infinite", debouncedSearch, categoryFilter, tagFilter],
+    queryFn: ({ pageParam }) => {
+      const params = buildParams(pageParam as number);
+      return fetch(`/api/notes?${params}`).then((r) => { if (!r.ok) throw new Error(); return r.json(); });
+    },
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, allPages) => {
+      if (lastPage.data.length < PAGE_SIZE) return undefined;
+      return allPages.length * PAGE_SIZE;
+    },
+    staleTime: 30 * 1000,
+  });
+
+  const notes = data?.pages.flatMap((p) => p.data) || [];
+  const total = data?.pages[0]?.total || 0;
+
+  const { data: categoriesData } = useApi<Category[]>(["categories"], "/api/categories", true, 5 * 60 * 1000);
+  const { data: tagsData } = useApi<Tag[]>(["tags"], "/api/tags", true, 5 * 60 * 1000);
+  const categories = categoriesData || [];
+  const allTags = tagsData || [];
 
   const allCategories = [...new Set([...notes.map((n) => n.category), ...categories.map((c) => c.name)])].sort();
 
-  const hasMore = offset + PAGE_SIZE < total;
   const loadedCount = notes.length;
 
   const toggleSelect = (id: string) => {
@@ -151,7 +132,7 @@ export default function AllNotesPage() {
       });
       setSelected(new Set());
       setBulkAction("");
-      fetchNotes(0, false, debouncedSearch, categoryFilter, tagFilter);
+      refetch();
     } catch { /* ignore */ }
     setBusy(false);
   };
@@ -165,6 +146,10 @@ export default function AllNotesPage() {
     } else {
       setSelectMode(true);
     }
+  };
+
+  const handleRetry = () => {
+    refetch();
   };
 
   return (
@@ -193,7 +178,7 @@ export default function AllNotesPage() {
       <div className="flex gap-md items-start">
         <input
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => { setSearch(e.target.value); setSelected(new Set()); }}
           className="flex-1 rounded-lg border border-hairline bg-canvas px-md py-[10px] text-body-md text-ink outline-none placeholder:text-muted focus:border-primary"
           placeholder="Search by title or category..."
         />
@@ -233,7 +218,7 @@ export default function AllNotesPage() {
         <div className="grid grid-cols-2 sm:flex sm:flex-row gap-md">
         <select
           value={categoryFilter}
-          onChange={(e) => setCategoryFilter(e.target.value)}
+          onChange={(e) => { setCategoryFilter(e.target.value); setSelected(new Set()); }}
           className="rounded-lg border border-hairline bg-canvas px-md h-9 text-body-md text-ink outline-none focus:border-primary"
         >
           <option value="">All Categories</option>
@@ -243,7 +228,7 @@ export default function AllNotesPage() {
         </select>
         <select
           value={tagFilter}
-          onChange={(e) => setTagFilter(e.target.value)}
+          onChange={(e) => { setTagFilter(e.target.value); setSelected(new Set()); }}
           className="w-full sm:w-auto rounded-lg border border-hairline bg-canvas px-md h-9 text-body-md text-ink outline-none focus:border-primary"
         >
           <option value="">All Tags</option>
@@ -343,7 +328,7 @@ export default function AllNotesPage() {
         </>
       )}
 
-      {loading && (
+      {isLoading && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-md">
           {Array.from({ length: 6 }).map((_, i) => (
             <div key={i} className="animate-pulse rounded-lg bg-surface p-xl">
@@ -355,22 +340,14 @@ export default function AllNotesPage() {
         </div>
       )}
 
-      {errorMsg && !error && (
-        <div className="rounded-lg bg-surface p-lg text-center">
-          <p className="text-body-sm text-semantic-error">{errorMsg}</p>
-        </div>
-      )}
-
-      {error && (
+      {isError && (
         <div className="flex flex-col items-center gap-md rounded-lg bg-surface p-hero">
-          <p className="text-body-md text-semantic-error">{errorMsg || "Failed to load notes."}</p>
-          <Button variant="secondary" onClick={() => { setError(false); fetchNotes(0, false, debouncedSearch, categoryFilter, tagFilter); }}>
-            Retry
-          </Button>
+          <p className="text-body-md text-semantic-error">Failed to load notes.</p>
+          <Button variant="secondary" onClick={handleRetry}>Retry</Button>
         </div>
       )}
 
-      {!loading && !error && notes.length === 0 && (
+      {!isLoading && !isError && notes.length === 0 && (
         <div className="flex flex-col items-center gap-md rounded-lg bg-surface p-hero">
           <p className="text-body-md text-slate">
             {isFiltering ? "No notes match your filters." : "No notes yet."}
@@ -383,7 +360,7 @@ export default function AllNotesPage() {
         </div>
       )}
 
-      {!loading && !error && notes.length > 0 && (
+      {!isLoading && !isError && notes.length > 0 && (
         <div>
           {selectMode && (
             <label className="flex items-center gap-2 mb-md cursor-pointer justify-end">
@@ -412,11 +389,11 @@ export default function AllNotesPage() {
               />
             ))}
           </div>
-          {!isFiltering && hasMore && (
+          {!isFiltering && hasNextPage && (
             <div className="mt-lg flex flex-col items-center gap-sm">
               <p className="text-body-sm text-stone">Showing {loadedCount} of {total}</p>
-              <Button variant="secondary" onClick={() => fetchNotes(offset + PAGE_SIZE, true)} disabled={loadingMore}>
-                {loadingMore ? "Loading..." : "Load more"}
+              <Button variant="secondary" onClick={() => fetchNextPage()} disabled={isFetchingNextPage}>
+                {isFetchingNextPage ? "Loading..." : "Load more"}
               </Button>
             </div>
           )}

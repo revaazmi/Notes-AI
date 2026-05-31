@@ -4,8 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { useSidebar } from "@/lib/sidebar-context";
+import { useApi } from "@/lib/use-api";
 import { useReminderNotifications, getActiveCount } from "@/lib/useReminderNotifications";
-import { useEffect, useState } from "react";
 
 interface Reminder {
   id: string;
@@ -18,34 +18,14 @@ export function Header() {
   const pathname = usePathname();
   const { data: session } = useSession();
   const { toggle } = useSidebar();
-  const [reminders, setReminders] = useState<Reminder[]>([]);
-  const [unreadReports, setUnreadReports] = useState(0);
 
   const show = session?.user && pathname !== "/" && pathname !== "/login" && pathname !== "/register" && !pathname.startsWith("/share");
 
-  useEffect(() => {
-    if (!show) return;
-    const ctrl = new AbortController();
-    fetch("/api/reminders", { signal: ctrl.signal })
-      .then((res) => (res.ok ? res.json() : []))
-      .then((data) => { if (!ctrl.signal.aborted) setReminders(data); })
-      .catch(() => {});
-    return () => ctrl.abort();
-  }, [show]);
+  const { data: remindersData } = useApi<Reminder[]>(["header-reminders"], "/api/reminders?limit=50", !!show);
+  const { data: unreadData } = useApi<{ count: number }>(["unread-reports"], "/api/reports/unread", !!show);
 
-  useEffect(() => {
-    if (!show) return;
-    const ctrl = new AbortController();
-    const fetchUnread = () => {
-      fetch("/api/reports/unread", { signal: ctrl.signal })
-        .then((r) => r.json())
-        .then((d) => { if (!ctrl.signal.aborted) setUnreadReports(d.count || 0); })
-        .catch(() => {});
-    };
-    fetchUnread();
-    const interval = setInterval(fetchUnread, 30000);
-    return () => { ctrl.abort(); clearInterval(interval); };
-  }, [show]);
+  const reminders = remindersData || [];
+  const unreadReports = unreadData?.count || 0;
 
   useReminderNotifications(reminders);
   const activeCount = getActiveCount(reminders);
