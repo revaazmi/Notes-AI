@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { useApi } from "@/lib/use-api";
 import { AuthGuard } from "@/components/auth/AuthGuard";
 import { NoteCard } from "@/components/features/NoteCard";
@@ -55,6 +55,7 @@ function formatTimeAgo(date: string) {
 const PAGE_SIZE = 12;
 
 export default function AllNotesPage() {
+  const qc = useQueryClient();
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
   const [tagFilter, setTagFilter] = useState("");
@@ -132,7 +133,8 @@ export default function AllNotesPage() {
       });
       setSelected(new Set());
       setBulkAction("");
-      refetch();
+      qc.invalidateQueries({ queryKey: ["notes-infinite"] });
+      qc.invalidateQueries({ queryKey: ["trash-notes"] });
     } catch { /* ignore */ }
     setBusy(false);
   };

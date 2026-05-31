@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { useApi } from "@/lib/use-api";
+import { useQueryClient } from "@tanstack/react-query";
 import remarkGfm from "remark-gfm";
 import { Button } from "@/components/ui/Button";
 
@@ -18,6 +19,7 @@ interface NoteEditorProps {
 
 export function NoteEditor({ noteId, initialTitle = "", initialContent = "", category = "General" }: NoteEditorProps) {
   const router = useRouter();
+  const qc = useQueryClient();
   const [title, setTitle] = useState(initialTitle);
   const [content, setContent] = useState(initialContent);
   const [currentCategory, setCurrentCategory] = useState(category);
@@ -297,6 +299,8 @@ export function NoteEditor({ noteId, initialTitle = "", initialContent = "", cat
     try {
       const res = await fetch(`/api/notes/${noteId}`, { method: "DELETE" });
       if (!res.ok) { setActionError("Failed to delete note."); return; }
+      qc.invalidateQueries({ queryKey: ["notes-infinite"] });
+      qc.invalidateQueries({ queryKey: ["trash-notes"] });
       router.push("/notes");
     } catch {
       setActionError("Failed to delete note.");
